@@ -1,0 +1,2 @@
+nasa-api-wrapper==0.1.6
+bernard==0.2.0
