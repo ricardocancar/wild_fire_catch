@@ -25,6 +25,28 @@ def mapper(n):
 
     return n
 
+def wrong_keyword():
+    key = input()
+    key = key.lower()
+    if key in ['y', 'n']:
+        return key
+    else:
+        wrong_keyword()
+
+def tester(n):
+        """
+        Displays the current candidate to the user and asks them to
+        check if they see wildfire damages.
+        """
+
+        bisector.index = n
+        bisector.image.show()
+        key = input(f'{bisector.date} - do you see it? y/n ')
+        if key in ['y', 'n']:
+            return key
+        else:
+            wrong_keyword()
+
 def bisect(n, mapper, tester):
     """
     Runs a bisection.
@@ -46,7 +68,7 @@ def bisect(n, mapper, tester):
 
         val = mapper(mid)
 
-        if tester(val):
+        if tester(val) == 'y':
             right = mid
         else:
             left = mid
@@ -74,11 +96,29 @@ class LandsatBisector:
         self.lon, self.lat = lon, lat
         self.shots = self.get_shots()
         self.index = 0
-
+        self.image = self.shots[self.index].image.image
+        
         print(f'First = {self.shots[0].asset.date}')
         print(f'Last = {self.shots[-1].asset.date}')
         print(f'Count = {len(self.shots)}')
-        
+    
+    @property
+    def count(self):
+        return len(self.shots)
+
+    @property
+    def index(self):
+        return self._index
+
+    @index.setter
+    def index(self, index):
+        self.image = self.shots[index].image.image
+        self._index = index
+    
+    @property
+    def date(self):
+        return self.shots[self.index].asset.date
+    
     def get_shots(self):
             """
             Not all returned assets are useful (some have clouds). This function
@@ -86,7 +126,7 @@ class LandsatBisector:
             pre-computed shots which can be used more easily.
             """
     
-            begin = '2019-03-01'
+            begin = '2015-01-01'
             end = datetime.now().strftime('%Y-%m-%d')
     
             assets = earth.assets(
@@ -99,9 +139,11 @@ class LandsatBisector:
     
                 if (img.cloud_score or 1.0) <= MAX_CLOUD_SCORE:
                     out.append(Shot(asset, img))
-    
+
             return out
         
 if __name__=='__main__':
     bisector = LandsatBisector(LON, LAT)
-    print(bisector.shots)
+    culprit = bisect(bisector.count, mapper, tester)
+    bisector.index = culprit
+    print(f"Found! First apparition = {bisector.date}")
