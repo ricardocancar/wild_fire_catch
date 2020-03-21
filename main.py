@@ -1,17 +1,13 @@
 # -*- coding: utf-8 -*-
 import os
-from typing import NamedTuple, Any
-from datetime import datetime
+from datetime import datetime, timedelta
 from nasa import earth
-import requests
 import sqlite3
-
 from telegram import  (
-    ReplyKeyboardMarkup, ReplyKeyboardRemove, User,
-    Bot,InlineKeyboardButton, InlineKeyboardMarkup)
+    ReplyKeyboardMarkup, ReplyKeyboardRemove)
 from telegram.ext import (
     Updater, CommandHandler, MessageHandler,
-    ConversationHandler, Filters,RegexHandler,CallbackQueryHandler)
+    ConversationHandler, Filters)
 from credentials import NASA_API_KEY, TELEGRAM_TOKEN
 MAX_CLOUD_SCORE = 0.5
 
@@ -23,8 +19,6 @@ C = conn.cursor()
 
 ANSWER1, END1 = range(2)
 
-with open('./url_imagen_cache.txt', 'r') as file:
-    URLS_CACHE = file.read().split(';')
 
 os.environ.setdefault(
     'NASA_API_KEY',
@@ -39,25 +33,9 @@ def mapper(n):
 
     return n
 
-def wrong_keyword():
-    key = input()
-    key = key.lower()
-    if key in ['y', 'n']:
-        return key
-    else:
-        wrong_keyword()
-
-class Shot(NamedTuple):
-    """
-    Represents a shot from Landsat. The asset is the output of the listing
-    and the image contains details about the actual image.
-    """
-
-    date: Any
-    url: Any
     
-
 def read():
+    """Get the data in cache from the sql data db"""
     C.execute('SELECT * FROM url_imagen')
     return C.fetchall()
     
@@ -69,7 +47,9 @@ def bisect(n, update, left, right):
     - `row[5]` is the number of elements to be bisected
     - `mapper` is a callable that will transform an integer from "0" to "n"
       into a value that can be tested
-    - `tester` returns true if the value is within the "right" range
+    - if the previous message from the user is yes we set right to mid value
+    - left the minimun date to be guessed 
+    - right the maximun date to be guessed 
     """
     
     if n < 1:
@@ -77,7 +57,6 @@ def bisect(n, update, left, right):
 
     
     mid = int((left + right) / 2)
-    print(f'biscet {mid}, left {left}, right {right}')
     C.execute(f'Update url_imagen set ind = {mid}')
     conn.commit()
     if update.message.text == 'Yes':
@@ -95,9 +74,8 @@ def get_shots():
     pre-computed shots which can be used more easily.
     """
 
-    begin = '2015-01-01'
-    end = '2016-01-01'
-    # end = datetime.now().strftime('%Y-%m-%d')
+    begin = (datetime.now() + timedelta(-365)).strftime('%Y-%m-%d')
+    end = datetime.now().strftime('%Y-%m-%d')
     
 
     assets = earth.assets(lat=LAT, lon=LON, begin=begin, end=end)
@@ -119,6 +97,7 @@ def get_shots():
     
         
 def keyboards():
+    """Set the keybords that will be show to the user"""
     bol = False
     keyboard = [['Yes','No']]
     reply_markup = ReplyKeyboardMarkup(keyboard,
@@ -127,38 +106,43 @@ def keyboards():
     return reply_markup
     
 def start(bot, update):
+    """This send the first message to the user showing how to use the bot"""
     bot.sendMessage(chat_id = update.message.chat_id, text = 
-                    (f'Hola {update.message.from_user.first_name}. '
-                     'Gracias por participar. Para interactuar '
-                     'conmigo puedes usar estos comandos:'))
+                    (f'Hello {update.message.from_user.first_name}. '
+                     'Thank you for participating. To interact '
+                     'with me you can use these commands:'))
     bot.sendMessage(chat_id = update.message.chat_id, text = (
-                   '/fire Para comenzar una nueva encuesta\n'
-                   '/cancel Cancelar el programa.\n'
-                   '/ayuda Da una descripcion del funcionamiento del bot.\n'
-                   'Puedes acceder a estos comandos en cualquier momento '
-                   'pulsando la barra /.' 
+                   '/fire To start a new iteration\n'
+                   '/cancel To cancel the iteration.\n'
+                   '/help It gives a description of the operation of the bot.'
+                   ' You can access these commands at any time '
+                   'by pressing the slash /.' 
                    ))
     bot.sendMessage(chat_id = update.message.chat_id,
-                    text = 'Para comenzar pulsa /fire.')
+                    text = 'To start press /fire.')
 
 
 def ayuda(bot,update):
+    """Description of the bot operation."""
     update.message.reply_text(
-      ('El bot mostrará las imágenes al usuario y éste tendrá que decir si ve '
-       'daños por incendio forestal en ellas. Al final, el bot indicará la '
-       'fecha que adivinó para los eventos.'),
+      ('The bot will show the images to the user and the user will have '
+       'to say if he sees. Forest wild fire damage on them. At the end, the '
+       'bot will indicate the date he guessed for the events.'),
       reply_markup=ReplyKeyboardRemove())
 
 
 def end(bot, update):
+    """
+    restaure the default values of the table and finish the conversation.
+    """
     rows=read()
     index = rows[0][5]
     bot.sendMessage(
         chat_id=update.message.chat_id,
         text = (f"Found! First apparition = {rows[index][3]}"))
     bot.sendMessage(chat_id=update.message.chat_id,
-                  text='¡Genial! Hemos terminado, si quieres interactuar '
-                       'otra vez pulsa'
+                  text='Great! We\'re done, if you want to interact ' 
+                       'again press '
                        '/fire ', reply_markup=ReplyKeyboardRemove())
     C.execute('Update url_imagen set ind = 0')
     conn.commit()
@@ -170,15 +154,18 @@ def end(bot, update):
 
 
 def fire(bot, update):
-   
-  
+    """
+    Start the conversation bettween human and the bot.
+    bot: is the bot object allowing to send message to the user.
+    update: update the status of the user conversation
+    """
     bot.sendMessage(
         chat_id=update.message.chat_id,
-        text = (f'Encantado {update.message.from_user.first_name} '
-                'que quieras continuar.'))
+        text = (f'Glad {update.message.from_user.first_name} '
+                'that you want to continue.'))
     bot.sendMessage(chat_id = update.message.chat.id,
-                    text='pulsa "yes" si ves un incendio\n'
-                          'pulsa "no" para indicar lo contrario.',
+                    text=('Press "Yes" buton if you see a wild fire\n'
+                          'Press "No" button if you don\'t see any fire.'),
                     reply_markup=keyboards())
     if read():
         rows = read()
@@ -191,13 +178,12 @@ def fire(bot, update):
         rows = get_shots()
     n = len(rows)
     conn.commit()
-        # bisector.index = n
     bot.send_photo(
         chat_id=update.message.chat.id,
         photo=rows[0][4])
     bot.sendMessage(
         chat_id=update.message.chat_id,
-        text = (f'Do you see fire y/n'))
+        text = (f'Do you see wild fire damage? y/n'))
     C.execute(f'Update url_imagen set right = {n-1}')
     conn.commit
     bisect(n, update, 0, n-1)
@@ -210,7 +196,6 @@ def answer(bot, update):
     index = rows[0][5]
     print(index)
     url = read()[index][4]
-        # bisector.index = n
     bot.send_photo(
         chat_id=update.message.chat.id,
         photo=url)
@@ -239,10 +224,6 @@ if __name__=='__main__':
     C.execute('''CREATE TABLE IF NOT EXISTS url_imagen (
         id integer PRIMARY KEY, lat float,lon float, date text, url text,
         ind integer, left integer, right integer);''')
-    # bisector = LandsatBisector(LON, LAT)
-    # culprit = bisect(bisector.count)
-    # bisector.index = culprit
-    # print(f"Found! First apparition = {bisector.date}")
     token = TELEGRAM_TOKEN
     updater = Updater(token, use_context=False)
     dp = updater.dispatcher
@@ -257,7 +238,7 @@ if __name__=='__main__':
     updater.dispatcher.add_error_handler(error)
     dp.add_handler(CommandHandler('start',start))
     dp.add_handler(conv_handler)
-    dp.add_handler(CommandHandler('ayuda',ayuda))
+    dp.add_handler(CommandHandler('help',ayuda))
     updater.start_polling()
     updater.idle()
     
